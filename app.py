@@ -1,22 +1,38 @@
-import pandas as pd
+# app.py
+from flask import Flask, render_template, jsonify
+import requests
+import datetime
 
-# Load your dataset
-df = pd.read_csv("Tambaram_20240303_20240902.csv")
+app = Flask(__name__)
 
-# Construct 'instruction' column with diverse queries (adjust based on your actual data and desired queries)
-df['instruction'] = df.apply(lambda row: 
-                              f"What's the weather forecast for {row['city']} on {row['dt']}?" 
-                              if pd.notna(row['dt']) else 
-                              f"Tell me about the current weather in {row['locality']}.", axis=1)
+# USGS feed URL (adjust feed as needed, e.g., all_day, significant_hour, etc.)
+USGS_URL = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson"
 
-# Construct 'response' column incorporating all relevant data
-df['response'] = df.apply(lambda row:
-                           f"The weather forecast for {row['city']} on {row['dt']} is {row['temperature']} with {row['humidity']}% humidity. Expect {row['rain_intensity']} rain with an accumulation of {row['rain_accumulation']}." 
-                           if pd.notna(row['dt']) else
-                           f"The current weather in {row['locality']} is {row['temperature']} with {row['humidity']}% humidity. The wind is blowing from the {row['wind_direction']} at {row['wind_speed']}.", axis=1)
+@app.route('/')
+def index():
+    return render_template('index.html')
 
-# Select only the necessary columns
-df = df[['instruction', 'response']]
+@app.route('/api/earthquakes')
+def get_earthquakes():
+    response = requests.get(USGS_URL)
+    data = response.json()
 
-# Save the modified dataset
-df.to_csv("autotrain_dataset.csv", index=False)
+    # Perform simple risk analysis
+    magnitudes = [feature['properties']['mag'] for feature in data['features'] if feature['properties']['mag'] is not None]
+    avg_mag = sum(magnitudes) / len(magnitudes) if magnitudes else 0
+    # Count events with magnitude 5.0 or above (adjust threshold as needed)
+    high_risk_events = [feature for feature in data['features'] if feature['properties']['mag'] and feature['properties']['mag'] >= 5.0]
+
+    analysis = {
+        "average_magnitude": round(avg_mag, 2),
+        "high_risk_count": len(high_risk_events),
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
+    }
+
+    return jsonify({
+        "data": data,
+        "analysis": analysis
+    })
+
+if __name__ == '__main__':
+    app.run(debug=True)

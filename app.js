@@ -19,57 +19,40 @@ class EarthquakeApp extends React.Component {
       loading: true,
       earthquakes: [],
       error: null,
-      currentTab: 0,
-      analysis: {
-        average_magnitude: 0,
-        high_risk_count: 0,
-        timestamp: new Date().toISOString()
-      }
+      currentTab: 0, // 0: Real-time Data, 1: Predictive Risk
+      historicalRiskData: null,
+      predictiveRiskText: ""
     };
   }
 
   componentDidMount() {
-    // Directly fetch real-time data from USGS
-    const USGS_URL = 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson';
-    fetch(USGS_URL)
+    // Fetch real-time earthquake data (last day)
+    const USGS_REALTIME = 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson';
+    fetch(USGS_REALTIME)
       .then(response => response.json())
       .then(data => {
         const features = data.features || [];
-
-        // Compute a basic risk analysis
-        const magnitudes = features
-          .map(feature => feature.properties.mag)
-          .filter(mag => mag != null);
-        const avgMag = magnitudes.length
-          ? magnitudes.reduce((sum, m) => sum + m, 0) / magnitudes.length
-          : 0;
-        const highRisk = features.filter(f => f.properties.mag >= 5.0);
-
         this.setState({
           earthquakes: features,
-          loading: false,
-          analysis: {
-            average_magnitude: avgMag.toFixed(2),
-            high_risk_count: highRisk.length,
-            timestamp: new Date().toISOString()
-          }
+          loading: false
         }, () => {
-          // Render the default (map) tab
-          this.renderMapPlot();
+          if (this.state.currentTab === 0) this.renderMapPlot();
         });
       })
-      .catch(error => {
-        this.setState({ error: error.toString(), loading: false });
-      });
+      .catch(error => this.setState({ error: error.toString(), loading: false }));
   }
 
   componentDidUpdate(prevProps, prevState) {
-    // Re-render the correct plot when switching tabs
     if (prevState.currentTab !== this.state.currentTab) {
       if (this.state.currentTab === 0) {
         this.renderMapPlot();
       } else if (this.state.currentTab === 1) {
-        this.renderRiskAnalysisMap();
+        // For predictive risk, fetch historical data if not already done
+        if (!this.state.historicalRiskData) {
+          this.fetchHistoricalRiskData();
+        } else {
+          this.renderPredictiveRiskMap();
+        }
       }
     }
   }
@@ -78,16 +61,17 @@ class EarthquakeApp extends React.Component {
     this.setState({ currentTab: newValue });
   };
 
-  // Plot 1: Real-time Earthquake Map
+  // ----------------------------
+  // Tab 0: Real-time Earthquake Map
+  // ----------------------------
   renderMapPlot() {
     const { earthquakes } = this.state;
     const lats = earthquakes.map(eq => eq.geometry.coordinates[1]);
     const lons = earthquakes.map(eq => eq.geometry.coordinates[0]);
     const mags = earthquakes.map(eq => eq.properties.mag);
-    const texts = earthquakes.map(eq => 
+    const texts = earthquakes.map(eq =>
       `Location: ${eq.properties.place}<br>Magnitude: ${eq.properties.mag}`
     );
-
     const data = [{
       type: 'scattergeo',
       lat: lats,
@@ -98,89 +82,78 @@ class EarthquakeApp extends React.Component {
         size: mags.map(m => m * 4),
         color: mags,
         colorscale: 'Viridis',
-        colorbar: {
-          title: 'Magnitude'
-        },
-        line: {
-          color: 'black',
-          width: 0.5
-        }
+        colorbar: { title: 'Magnitude' },
+        line: { color: 'black', width: 0.5 }
       }
     }];
-
     const layout = {
       title: 'Real-time Earthquake Data',
-      geo: {
-        scope: 'world',
-        projection: { type: 'natural earth' },
-        showland: true,
-        landcolor: 'rgb(217, 217, 217)'
+      geo: { 
+        scope: 'world', 
+        projection: { type: 'natural earth' }, 
+        showland: true, 
+        landcolor: 'rgb(217, 217, 217)' 
       },
       margin: { t: 50, b: 0, l: 0, r: 0 }
     };
-
     Plotly.newPlot('map', data, layout, { responsive: true });
   }
 
-  // Plot 2: Risk Analysis by Location (Aggregated)
-  renderRiskAnalysisMap() {
-    const { earthquakes } = this.state;
-    const locationData = {};
+  // ----------------------------
+  // Tab 1: Predictive Risk (historical data)
+  // ----------------------------
+  fetchHistoricalRiskData() {
+    const USGS_HISTORICAL = 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_month.geojson';
+    fetch(USGS_HISTORICAL)
+      .then(response => response.json())
+      .then(data => {
+        const features = data.features || [];
+        let aggregated = {};
+        // Consider only events with magnitude ≥ 5.0
+        features.forEach(eq => {
+          if (eq.properties.mag >= 5.0) {
+            let place = eq.properties.place || "Unknown";
+            let region = place.includes(',') ? place.split(',').pop().trim() : place;
+            const [lon, lat] = eq.geometry.coordinates;
+            const mag = eq.properties.mag;
+            if (!aggregated[region]) {
+              aggregated[region] = { count: 0, totalMag: 0, totalLat: 0, totalLon: 0 };
+            }
+            aggregated[region].count += 1;
+            aggregated[region].totalMag += mag;
+            aggregated[region].totalLat += lat;
+            aggregated[region].totalLon += lon;
+          }
+        });
+        // Convert aggregated object into an array
+        const aggArray = Object.keys(aggregated).map(region => {
+          const d = aggregated[region];
+          return {
+            region,
+            count: d.count,
+            avgMag: d.count > 0 ? d.totalMag / d.count : 0,
+            avgLat: d.count > 0 ? d.totalLat / d.count : 0,
+            avgLon: d.count > 0 ? d.totalLon / d.count : 0
+          };
+        });
+        this.setState({ historicalRiskData: aggArray }, () => {
+          this.renderPredictiveRiskMap();
+          this.generatePredictiveRiskText();
+        });
+      })
+      .catch(error => this.setState({ error: error.toString() }));
+  }
 
-    earthquakes.forEach(eq => {
-      const place = eq.properties.place || 'Unknown';
-      // Extract region from the last comma if present
-      let region = place;
-      if (place.includes(',')) {
-        const parts = place.split(',');
-        region = parts[parts.length - 1].trim();
-      }
-
-      const coords = eq.geometry.coordinates; // [lon, lat, depth]
-      const lat = coords[1];
-      const lon = coords[0];
-      const mag = eq.properties.mag;
-
-      if (!locationData[region]) {
-        locationData[region] = {
-          count: 0,
-          totalMag: 0,
-          totalLat: 0,
-          totalLon: 0
-        };
-      }
-
-      if (mag != null) {
-        locationData[region].count += 1;
-        locationData[region].totalMag += mag;
-        locationData[region].totalLat += lat;
-        locationData[region].totalLon += lon;
-      }
-    });
-
-    const regions = Object.keys(locationData);
-    const counts = [];
-    const avgMags = [];
-    const avgLats = [];
-    const avgLons = [];
-    const hoverText = [];
-
-    regions.forEach(region => {
-      const data = locationData[region];
-      const count = data.count;
-      const avgMag = count > 0 ? data.totalMag / count : 0;
-      const avgLat = count > 0 ? data.totalLat / count : 0;
-      const avgLon = count > 0 ? data.totalLon / count : 0;
-
-      counts.push(count);
-      avgMags.push(avgMag);
-      avgLats.push(avgLat);
-      avgLons.push(avgLon);
-      hoverText.push(
-        `Region: ${region}<br>Events: ${count}<br>Avg Mag: ${avgMag.toFixed(2)}`
-      );
-    });
-
+  renderPredictiveRiskMap() {
+    const { historicalRiskData } = this.state;
+    if (!historicalRiskData) return;
+    const counts = historicalRiskData.map(d => d.count);
+    const avgLats = historicalRiskData.map(d => d.avgLat);
+    const avgLons = historicalRiskData.map(d => d.avgLon);
+    const avgMags = historicalRiskData.map(d => d.avgMag);
+    const hoverText = historicalRiskData.map(d =>
+      `Region: ${d.region}<br>High Mag Events: ${d.count}<br>Avg Mag: ${d.avgMag.toFixed(2)}`
+    );
     const dataPlot = [{
       type: 'scattergeo',
       lat: avgLats,
@@ -188,37 +161,56 @@ class EarthquakeApp extends React.Component {
       text: hoverText,
       hoverinfo: 'text',
       marker: {
-        size: counts.map(c => Math.min(c * 3, 50)), // scale marker size
+        size: counts.map(c => Math.min(c * 4, 50)),
         color: avgMags,
         colorscale: 'Viridis',
         colorbar: { title: 'Avg Magnitude' },
         line: { color: 'black', width: 0.5 }
       }
     }];
-
     const layout = {
-      title: 'Risk Analysis by Location (Aggregated)',
-      geo: {
-        scope: 'world',
-        projection: { type: 'natural earth' },
-        showland: true,
-        landcolor: 'rgb(217, 217, 217)'
+      title: 'Predictive Risk Analysis (Historical Data)',
+      geo: { 
+        scope: 'world', 
+        projection: { type: 'natural earth' }, 
+        showland: true, 
+        landcolor: 'rgb(217, 217, 217)' 
       },
       margin: { t: 50, b: 0, l: 0, r: 0 }
     };
+    Plotly.newPlot('predictive-map', dataPlot, layout, { responsive: true });
+  }
 
-    Plotly.newPlot('risk-plot', dataPlot, layout, { responsive: true });
+  // Generate a 50-word dynamic predictive risk text
+  generatePredictiveRiskText() {
+    const { historicalRiskData } = this.state;
+    if (!historicalRiskData || historicalRiskData.length === 0) {
+      this.setState({ predictiveRiskText: "Insufficient historical data available to generate predictive risk analysis at this time." });
+      return;
+    }
+    // Sort regions by count descending and take top 3
+    const sorted = historicalRiskData.sort((a, b) => b.count - a.count);
+    const top = sorted.slice(0, 3);
+    const region1 = top[0] ? top[0].region : "N/A";
+    const count1 = top[0] ? top[0].count : "0";
+    const region2 = top[1] ? top[1].region : "N/A";
+    const count2 = top[1] ? top[1].count : "0";
+    const region3 = top[2] ? top[2].region : "N/A";
+    const count3 = top[2] ? top[2].count : "0";
+    // 50-word predictive risk text template
+    const text =
+      `Historical data from the past month indicates that the regions of ${region1} (with ${count1} high magnitude events), ${region2} (with ${count2} events), and ${region3} (with ${count3} events) are at elevated risk for severe seismic activity. This statistical trend suggests a higher probability of future earthquakes; therefore, rigorous monitoring is strongly advised.`;
+    this.setState({ predictiveRiskText: text });
   }
 
   render() {
-    const { loading, error, currentTab, analysis } = this.state;
-
+    const { loading, error, currentTab, predictiveRiskText } = this.state;
     return (
       <div>
         <AppBar position="static">
           <Toolbar>
             <Typography variant="h6">
-              Earthquake Visualization & Risk Mapping
+              Earthquake Visualization & Predictive Risk Mapping
             </Typography>
           </Toolbar>
         </AppBar>
@@ -232,47 +224,36 @@ class EarthquakeApp extends React.Component {
           ) : (
             <div>
               <Tabs value={currentTab} onChange={this.handleTabChange} centered>
-                <Tab label="Real-time Earthquake Data" />
-                <Tab label="Risk Analysis" />
+                <Tab label="Real-time Data" />
+                <Tab label="Predictive Risk" />
               </Tabs>
 
               {currentTab === 0 && (
-                <div
-                  id="map"
-                  style={{ width: '100%', height: '600px', marginTop: '20px' }}
-                />
+                <div id="map" style={{ width: '100%', height: '600px', marginTop: '20px' }} />
               )}
 
               {currentTab === 1 && (
                 <div style={{ marginTop: '20px' }}>
                   <Grid container spacing={2}>
+                    <Grid item xs={12} md={8}>
+                      <div id="predictive-map" style={{ width: '100%', height: '600px' }} />
+                    </Grid>
                     <Grid item xs={12} md={4}>
                       <Card>
                         <CardContent>
                           <Typography variant="h6" gutterBottom>
-                            Risk Summary
+                            Predictive Risk Analysis
                           </Typography>
-                          <Typography variant="body1">
-                            Average Magnitude: {analysis.average_magnitude}
-                          </Typography>
-                          <Typography variant="body1">
-                            High-Risk Events (Magnitude ≥ 5.0): {analysis.high_risk_count}
-                          </Typography>
-                          <Typography variant="caption" display="block" gutterBottom>
-                            Data Timestamp (UTC): {analysis.timestamp}
+                          <Typography variant="body2">
+                            {predictiveRiskText}
                           </Typography>
                         </CardContent>
                       </Card>
                     </Grid>
-                    <Grid item xs={12} md={8}>
-                      <div
-                        id="risk-plot"
-                        style={{ width: '100%', height: '600px' }}
-                      />
-                    </Grid>
                   </Grid>
                 </div>
               )}
+
             </div>
           )}
         </Container>

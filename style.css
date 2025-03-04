@@ -1,0 +1,21 @@
+/* static/style.css */
+body {
+  margin: 0;
+  font-family: 'Roboto', sans-serif;
+  background-color: #ffffff;
+  color: #333333;
+}
+
+header, .MuiAppBar-root {
+  background-color: #003366; /* Deep blue accent */
+  color: #ffffff;
+}
+
+.container {
+  padding: 16px;
+}
+
+#map {
+  width: 100%;
+  height: 600px;
+}

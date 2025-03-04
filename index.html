@@ -1,0 +1,35 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Earthquake Visualization & Risk Mapping</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- Material UI Fonts & Icons -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700&display=swap" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons" />
+  
+  <!-- Custom CSS -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  
+  <!-- Plotly -->
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  
+  <!-- React and ReactDOM -->
+  <script src="https://unpkg.com/react@17/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js" crossorigin></script>
+  
+  <!-- Material UI (UMD build) -->
+  <script src="https://unpkg.com/@mui/material@5.0.0-rc.0/umd/material-ui.development.js" crossorigin></script>
+  
+  <!-- Babel for JSX transpiling -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  
+  <!-- Our React App (written in JSX) -->
+  <script type="text/babel" src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
